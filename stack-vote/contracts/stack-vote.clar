@@ -37,23 +37,24 @@
   (default-to u0 (map-get? token-balances user))
 )
 
-(define-public (set-token-balance (user principal) (balance uint))
-  (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-  (map-set token-balances user balance)
-  (ok true)
+(define-public (set-token-balance (data {user: principal, balance: uint}))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (map-set token-balances (get user data) (get balance data)))
+  )
 )
 
-(define-public (create-proposal (title (string-ascii 100)) (description (string-ascii 500)))
+(define-public (create-proposal (data {title: (string-ascii 100), description: (string-ascii 500)}))
   (let ((user-balance (get-token-balance tx-sender))
         (proposal-id (+ (var-get proposal-counter) u1)))
     (asserts! (>= user-balance (var-get min-proposal-threshold)) err-insufficient-tokens)
     (map-set proposals proposal-id {
       creator: tx-sender,
-      title: title,
-      description: description,
+      title: (get title data),
+      description: (get description data),
       yes-votes: u0,
       no-votes: u0,
-      end-block: (+ block-height (var-get voting-period)),
+      end-block: (+ stacks-block-height (var-get voting-period)),
       executed: false
     })
     (var-set proposal-counter proposal-id)
@@ -61,11 +62,13 @@
   )
 )
 
-(define-public (vote (proposal-id uint) (support bool))
-  (let ((proposal (unwrap! (get-proposal proposal-id) err-proposal-not-found))
+(define-public (vote (data {proposal-id: uint, support: bool}))
+  (let ((proposal-id (get proposal-id data))
+        (support (get support data))
+        (proposal (unwrap! (get-proposal proposal-id) err-proposal-not-found))
         (user-balance (get-token-balance tx-sender))
         (vote-key {proposal-id: proposal-id, voter: tx-sender}))
-    (asserts! (< block-height (get end-block proposal)) err-voting-ended)
+    (asserts! (< stacks-block-height (get end-block proposal)) err-voting-ended)
     (asserts! (is-none (map-get? votes vote-key)) err-already-voted)
     (map-set votes vote-key support)
     (if support
@@ -78,15 +81,32 @@
 
 (define-public (execute-proposal (proposal-id uint))
   (let ((proposal (unwrap! (get-proposal proposal-id) err-proposal-not-found)))
-    (asserts! (>= block-height (get end-block proposal)) err-voting-ended)
+    (asserts! (>= stacks-block-height (get end-block proposal)) err-voting-ended)
     (asserts! (> (get yes-votes proposal) (get no-votes proposal)) (err u205))
     (map-set proposals proposal-id (merge proposal {executed: true}))
     (ok true)
   )
 )
 
-(define-public (set-voting-period (new-period uint))
-  (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-  (var-set voting-period new-period)
-  (ok true)
+(define-public (set-voting-period (data {new-period: uint}))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set voting-period (get new-period data))
+    (ok true)
+  )
+)
+
+;; Helper function to get current proposal counter
+(define-read-only (get-proposal-counter)
+  (var-get proposal-counter)
+)
+
+;; Helper function to get current voting period
+(define-read-only (get-voting-period)
+  (var-get voting-period)
+)
+
+;; Helper function to get minimum proposal threshold
+(define-read-only (get-min-proposal-threshold)
+  (var-get min-proposal-threshold)
 )
